@@ -41,7 +41,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN PV */
-
+extern uint32_t systick_cnt;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -180,10 +180,40 @@ void PendSV_Handler(void)
 /**
   * @brief This function handles System tick timer.
   */
-void SysTick_Handler(void)
+// void SysTick_Handler(void)
+__attribute__ ((naked)) void SysTick_Handler(void)
 {
   /* USER CODE BEGIN SysTick_IRQn 0 */
+  systick_cnt++;
+	  // save LR back to main, must do this firstly
+	   __asm volatile("PUSH {LR}");
 
+	  /* Save the context of current task */
+
+	  // get current PSP
+	  __asm volatile("MRS R0, PSP");
+	  // save R4 to R11 to PSP Frame Stack
+	  __asm volatile("STMDB R0!, {R4-R11}"); // R0 is updated after decrement
+	  // save current value of PSP
+	  __asm volatile("BL save_current_psp"); // R0 is first argument
+
+	  /* Do scheduling */
+
+	  // select next task
+	  __asm volatile("BL select_next_task");
+
+	  /* Retrieve the context of next task */
+
+	  // get its past PSP value
+	  __asm volatile("BL get_current_psp"); // return PSP is in R0
+	  // retrieve R4-R11 from PSP Fram Stack
+	  __asm volatile("LDMIA R0!, {R4-R11}"); // R0 is updated after increment
+	  // update PSP
+	  __asm volatile("MSR PSP, R0");
+
+	  // exit
+	  __asm volatile("POP {LR}");
+	  __asm volatile("BX LR");
   /* USER CODE END SysTick_IRQn 0 */
 
   /* USER CODE BEGIN SysTick_IRQn 1 */

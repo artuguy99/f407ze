@@ -31,6 +31,18 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+/* SysTick register address */
+#define SCSR                  *((volatile uint32_t*) 0xE000E010u)
+#define SRVR                  *((volatile uint32_t*) 0xE000E014u)
+
+/* RAM */
+#define RAM_START         (0x20000000u)
+#define RAM_SIZE          (128 * 1024) // 128 KB
+
+/* Stacks */
+#define MAIN_STACK        (RAM_START + RAM_SIZE)
+#define TASK_NUMBER_MAX   (16)
+#define TASK_STACK_SIZE   (1024u)
 
 /* USER CODE END PD */
 
@@ -42,6 +54,9 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+uint32_t __uCurrentTaskIdx = 0;
+uint32_t __puTasksPSP[TASK_NUMBER_MAX] = {0};
+uint32_t systick_cnt = 0;
 
 /* USER CODE END PV */
 
@@ -50,6 +65,126 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
+uint32_t get_current_psp() {
+  return __puTasksPSP[__uCurrentTaskIdx];
+}
+
+void save_current_psp(uint32_t psp) {
+  __puTasksPSP[__uCurrentTaskIdx] = psp;
+}
+
+void select_next_task() {
+  /* Round-Robin scheduler */
+  __uCurrentTaskIdx++;
+  // check if a task is register at current slot
+  if (__uCurrentTaskIdx >= TASK_NUMBER_MAX || __puTasksPSP[__uCurrentTaskIdx] == 0) {
+    __uCurrentTaskIdx=0;
+  }
+}
+
+void start_scheduler() {
+  printf("Start Scheduler!\n\r");
+
+  // start with the first task
+  __uCurrentTaskIdx = 0;
+
+  // prepare PSP of the first task
+  __asm volatile("BL get_current_psp"); // return PSP in R0
+  __asm volatile("MSR PSP, R0");  // set PSP
+
+  // change to use PSP
+  __asm volatile("MRS R0, CONTROL");
+  __asm volatile("ORR R0, R0, #2"); // set bit[1] SPSEL
+  __asm volatile("MSR CONTROL, R0");
+
+  // start SysTick
+  // clear and set the period
+  // SRVR &= ~0xFFFFFFFF;
+  // SRVR |= 16000-1; // 1000 Hz ~ 1 ms
+  // enable SysTick
+  // SCSR |= (1 << 1); // enable SysTick Exception request
+  // SCSR |= (1 << 2); // select system clock
+  // SCSR |= (1 << 0); // start
+  LL_Init1msTick(168000000);
+  LL_SetSystemCoreClock(168000000);
+  LL_SYSTICK_EnableIT();
+  // Move to Unprivileged level
+  __asm volatile("MRS R0, CONTROL");
+  __asm volatile("ORR R0, R0, #1"); // Set bit[0] nPRIV
+  __asm volatile("MSR CONTROL, R0");
+  // right after here, access is limited
+
+  // get the handler of the first task by tracing back from PSP which is at R4 slot
+  void (*handler)() = (void (*))((uint32_t*)__puTasksPSP[__uCurrentTaskIdx])[14];
+
+  // execute the handler
+  handler();
+}
+
+
+void init_task(void (*handler)) {
+  int i=0;
+
+  // find an empty slot
+  for(; i<TASK_NUMBER_MAX; i++) {
+    if (__puTasksPSP[i] == 0) break;
+  }
+
+  if(i >= TASK_NUMBER_MAX) {
+    printf("Can not register a new task anymore!\n");
+    return;
+  } else {
+    printf("Register a task %p at slot %i\n\r", handler, i);
+  }
+
+  // calculate new PSP
+  uint32_t* psp = (uint32_t*)(MAIN_STACK - (i+1)*TASK_STACK_SIZE);
+
+  // fill dummy stack frame
+  *(--psp) = 0x01000000u; // Dummy xPSR, just enable Thumb State bit;
+  *(--psp) = (uint32_t) handler; // PC
+  *(--psp) = 0xFFFFFFFDu; // LR with EXC_RETURN to return to Thread using PSP
+  *(--psp) = 0x12121212u; // Dummy R12
+  *(--psp) = 0x03030303u; // Dummy R3
+  *(--psp) = 0x02020202u; // Dummy R2
+  *(--psp) = 0x01010101u; // Dummy R1
+  *(--psp) = 0x00000000u; // Dummy R0
+  *(--psp) = 0x11111111u; // Dummy R11
+  *(--psp) = 0x10101010u; // Dummy R10
+  *(--psp) = 0x09090909u; // Dummy R9
+  *(--psp) = 0x08080808u; // Dummy R8
+  *(--psp) = 0x07070707u; // Dummy R7
+  *(--psp) = 0x06060606u; // Dummy R6
+  *(--psp) = 0x05050505u; // Dummy R5
+  *(--psp) = 0x04040404u; // Dummy R4
+
+  // save PSP
+  __puTasksPSP[i] = (uint32_t)psp;
+}
+
+/* Tasks */
+void task1_main(void) {
+  while(1) {
+    printf("1111\n\r");
+    // if (systick_cnt & 0x400) {
+    //   LL_GPIO_ResetOutputPin(GPIOF, LL_GPIO_PIN_10);
+    // } else {
+    //   LL_GPIO_SetOutputPin(GPIOF, LL_GPIO_PIN_10);
+    // }
+  }
+}
+
+void task2_main(void) {
+  while(1) {
+    // if (systick_cnt & 0x100) {
+    //   LL_GPIO_ResetOutputPin(GPIOF, LL_GPIO_PIN_8);
+    // } else {
+    //   LL_GPIO_SetOutputPin(GPIOF, LL_GPIO_PIN_8);
+    // }
+
+    printf("2222\n\r");
+  }
+}
 
 /* USER CODE END PFP */
 
@@ -99,7 +234,10 @@ int main(void)
   printf("Good afternoon, Zili.Li\n\r");
   printf("systemcoreclk = %ld\n\r", SystemCoreClock);
   printf("size of long long = %d\n\r", sizeof(long long));
+  init_task(task1_main);
+  init_task(task2_main);
 
+  start_scheduler();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -153,8 +291,8 @@ void SystemClock_Config(void)
   {
 
   }
-  LL_Init1msTick(168000000);
-  LL_SetSystemCoreClock(168000000);
+  // LL_Init1msTick(168000000);
+  // LL_SetSystemCoreClock(168000000);
 }
 
 /**
