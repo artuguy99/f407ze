@@ -21,7 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -95,6 +95,10 @@ int main(void)
   MX_GPIO_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
+  setvbuf(stdout, NULL, _IONBF, 0);
+  printf("Good afternoon, Zili.Li\n\r");
+  printf("systemcoreclk = %ld\n\r", SystemCoreClock);
+  printf("size of long long = %d\n\r", sizeof(long long));
 
   /* USER CODE END 2 */
 
@@ -203,7 +207,7 @@ static void MX_USART1_UART_Init(void)
   LL_USART_ConfigAsyncMode(USART1);
   LL_USART_Enable(USART1);
   /* USER CODE BEGIN USART1_Init 2 */
-
+  LL_USART_EnableIT_RXNE(USART1);
   /* USER CODE END USART1_Init 2 */
 
 }
@@ -241,6 +245,35 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+void ByteReceivedCallback(void)
+{
+    uint8_t ch;
+    // read the data from the data reception register
+    // by doing this, we also clear the interrupt flag
+    ch = LL_USART_ReceiveData8(USART1);
+
+    //waiting until the Transmit Empty flag is set
+    while(!LL_USART_IsActiveFlag_TXE(USART1));
+
+    LL_USART_TransmitData8(USART1, ch);
+
+    //Wait until the transmit complete Flag to be raised
+    while (!LL_USART_IsActiveFlag_TC(USART1));
+}
+
+/* USER CODE BEGIN 4 */
+int _write (int fd, char * ptr, int len)
+{
+  int i;
+
+  for (i = 0; i < len; i++) {
+    while(!LL_USART_IsActiveFlag_TXE(USART1));
+    LL_USART_TransmitData8(USART1, *ptr++);
+    // SER_PutChar (*ptr++);
+  }
+  while (!LL_USART_IsActiveFlag_TC(USART1));
+  return (i);
+}
 /* USER CODE END 4 */
 
 /**

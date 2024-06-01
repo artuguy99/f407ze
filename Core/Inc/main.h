@@ -84,7 +84,7 @@ void Error_Handler(void);
 #endif
 
 /* USER CODE BEGIN Private defines */
-
+void ByteReceivedCallback(void);
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

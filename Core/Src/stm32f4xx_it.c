@@ -204,6 +204,11 @@ void SysTick_Handler(void)
 void USART1_IRQHandler(void)
 {
   /* USER CODE BEGIN USART1_IRQn 0 */
+	  if(LL_USART_IsActiveFlag_RXNE(USART1))
+	  {
+	    ByteReceivedCallback();
+	    LL_USART_ClearFlag_RXNE(USART1);
+	  }
 
   /* USER CODE END USART1_IRQn 0 */
   /* USER CODE BEGIN USART1_IRQn 1 */
