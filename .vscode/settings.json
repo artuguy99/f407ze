@@ -1,5 +1,8 @@
 {
     "files.associations": {
         "main.h": "c"
-    }
+    },
+    "cortex-debug.gdbPath": "gdb-multiarch", 
+    "makefile.extensionOutputFolder": "./.vscode",
+    "cortex-debug.variableUseNaturalFormat": false
 }

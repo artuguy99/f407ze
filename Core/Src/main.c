@@ -1,62 +1,15 @@
-/* USER CODE BEGIN Header */
-/**
-  ******************************************************************************
-  * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2024 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
-/* USER CODE END Header */
-/* Includes ------------------------------------------------------------------*/
 #include "main.h"
-
-/* Private includes ----------------------------------------------------------*/
-/* USER CODE BEGIN Includes */
 #include <stdio.h>
-/* USER CODE END Includes */
-
-/* Private typedef -----------------------------------------------------------*/
-/* USER CODE BEGIN PTD */
-
-/* USER CODE END PTD */
-
-/* Private define ------------------------------------------------------------*/
-/* USER CODE BEGIN PD */
-/* SysTick register address */
-#define SCSR                  *((volatile uint32_t*) 0xE000E010u)
-#define SRVR                  *((volatile uint32_t*) 0xE000E014u)
-
 /* RAM */
 #define RAM_START         (0x20000000u)
 #define RAM_SIZE          (128 * 1024) // 128 KB
-
 /* Stacks */
 #define MAIN_STACK        (RAM_START + RAM_SIZE)
 #define TASK_NUMBER_MAX   (16)
 #define TASK_STACK_SIZE   (1024u)
 
-/* USER CODE END PD */
-
-/* Private macro -------------------------------------------------------------*/
-/* USER CODE BEGIN PM */
-
-/* USER CODE END PM */
-
-/* Private variables ---------------------------------------------------------*/
-
-/* USER CODE BEGIN PV */
 uint32_t __uCurrentTaskIdx = 0;
 uint32_t __puTasksPSP[TASK_NUMBER_MAX] = {0};
-uint32_t systick_cnt = 0;
 
 /* USER CODE END PV */
 
@@ -87,33 +40,29 @@ void start_scheduler() {
 
   // start with the first task
   __uCurrentTaskIdx = 0;
-
+  // Step 3: 
   // prepare PSP of the first task
   __asm volatile("BL get_current_psp"); // return PSP in R0
-  __asm volatile("MSR PSP, R0");  // set PSP
+  __asm volatile("MSR PSP, R0");  // set PSP  <- R0, PSP is R13
 
   // change to use PSP
-  __asm volatile("MRS R0, CONTROL");
-  __asm volatile("ORR R0, R0, #2"); // set bit[1] SPSEL
-  __asm volatile("MSR CONTROL, R0");
+  __asm volatile("MRS R0, CONTROL");  // set R0  <- CONTROL, 
+  __asm volatile("ORR R0, R0, #2"); // set bit[1] SPSEL, R0 |= 0X02;
+  __asm volatile("MSR CONTROL, R0");  //  set CONTROL  <- R0
 
-  // start SysTick
-  // clear and set the period
-  // SRVR &= ~0xFFFFFFFF;
-  // SRVR |= 16000-1; // 1000 Hz ~ 1 ms
-  // enable SysTick
-  // SCSR |= (1 << 1); // enable SysTick Exception request
-  // SCSR |= (1 << 2); // select system clock
-  // SCSR |= (1 << 0); // start
+  // Step 4: Set sysTick interrupt
   LL_Init1msTick(168000000);
   LL_SetSystemCoreClock(168000000);
   LL_SYSTICK_EnableIT();
+
+  // Step 5: optional
   // Move to Unprivileged level
   __asm volatile("MRS R0, CONTROL");
   __asm volatile("ORR R0, R0, #1"); // Set bit[0] nPRIV
   __asm volatile("MSR CONTROL, R0");
   // right after here, access is limited
 
+  // Step 6: Run the 1st task
   // get the handler of the first task by tracing back from PSP which is at R4 slot
   void (*handler)() = (void (*))((uint32_t*)__puTasksPSP[__uCurrentTaskIdx])[14];
 
@@ -124,7 +73,6 @@ void start_scheduler() {
 
 void init_task(void (*handler)) {
   int i=0;
-
   // find an empty slot
   for(; i<TASK_NUMBER_MAX; i++) {
     if (__puTasksPSP[i] == 0) break;
@@ -166,22 +114,11 @@ void init_task(void (*handler)) {
 void task1_main(void) {
   while(1) {
     printf("1111\n\r");
-    // if (systick_cnt & 0x400) {
-    //   LL_GPIO_ResetOutputPin(GPIOF, LL_GPIO_PIN_10);
-    // } else {
-    //   LL_GPIO_SetOutputPin(GPIOF, LL_GPIO_PIN_10);
-    // }
   }
 }
 
 void task2_main(void) {
   while(1) {
-    // if (systick_cnt & 0x100) {
-    //   LL_GPIO_ResetOutputPin(GPIOF, LL_GPIO_PIN_8);
-    // } else {
-    //   LL_GPIO_SetOutputPin(GPIOF, LL_GPIO_PIN_8);
-    // }
-
     printf("2222\n\r");
   }
 }
@@ -200,12 +137,11 @@ void task2_main(void) {
 int main(void)
 {
   /* USER CODE BEGIN 1 */
-
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
 
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+  /* Reset of all peripherals, Initializes the Flash interface. */
   LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_SYSCFG);
   LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_PWR);
 
@@ -229,11 +165,8 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART1_UART_Init();
+  
   /* USER CODE BEGIN 2 */
-  setvbuf(stdout, NULL, _IONBF, 0);
-  printf("Good afternoon, Zili.Li\n\r");
-  printf("systemcoreclk = %ld\n\r", SystemCoreClock);
-  printf("size of long long = %d\n\r", sizeof(long long));
   init_task(task1_main);
   init_task(task2_main);
 
@@ -252,6 +185,36 @@ int main(void)
   /* USER CODE END 3 */
 }
 
+__attribute__ ((naked)) void SysTick_Handler(void)
+{
+  	  /* Save the context of current task */
+	  // save LR back to main, must do this firstly
+	  __asm volatile("PUSH {LR}");
+	  // get current PSP
+	  __asm volatile("MRS R0, PSP");
+	  // save R4 to R11 to PSP Frame Stack
+	  __asm volatile("STMDB R0!, {R4-R11}"); // R0 is updated after decrement
+	  // save current value of PSP
+	  __asm volatile("BL save_current_psp"); // R0 is first argument
+
+	  /* Do scheduling */
+
+	  // select next task
+	  __asm volatile("BL select_next_task");
+
+	  /* Retrieve the context of next task */
+
+	  // get its past PSP value
+	  __asm volatile("BL get_current_psp"); // return PSP is in R0
+	  // retrieve R4-R11 from PSP Fram Stack
+	  __asm volatile("LDMIA R0!, {R4-R11}"); // R0 is updated after increment
+	  // update PSP
+	  __asm volatile("MSR PSP, R0");
+
+	  // exit
+    __asm volatile("POP {LR}");
+	  __asm volatile("BX LR");
+}
 /**
   * @brief System Clock Configuration
   * @retval None
