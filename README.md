@@ -1,20 +1,20 @@
 # f407ze
 
-本项目使用的 CPU 为 STM32F407ZET6, 
-Firmware version 是 STM32Cube FW_F4 V1.27.1
-使用 STM32CubeMX 生成目录结构 和 Makefile.
+本项目使用的 CPU 为 STM32F407ZET6,   
+Firmware version 是 STM32Cube FW_F4 V1.27.1  
+使用 STM32CubeMX 生成目录结构 和 Makefile.  
 
-artuguy@ryzen5:~/stm32/f407ze$ tree
-.
-├── Core
-│   ├── Inc
-│   │   ├── main.h
-│   │   ├── stm32_assert.h
-│   │   └── stm32f4xx_it.h
-│   └── Src
-│       ├── main.c
-│       ├── stm32f4xx_it.c
-│       └── system_stm32f4xx.c
+artuguy@ryzen5:~/stm32/f407ze$ tree  
+.  
+├── Core  
+│   ├── Inc  
+│   │   ├── main.h  
+│   │   ├── stm32_assert.h  
+│   │   └── stm32f4xx_it.h  
+│   └── Src  
+│       ├── main.c  
+│       ├── stm32f4xx_it.c  
+│       └── system_stm32f4xx.c  
 ├── Drivers
 │   ├── CMSIS
 │   │   ├── Device
