@@ -148,8 +148,11 @@ int main(void)
   /* System interrupt init*/
   NVIC_SetPriorityGrouping(NVIC_PRIORITYGROUP_4);
 
+  /* PendSV_IRQn interrupt configuration */
+  NVIC_SetPriority(PendSV_IRQn, NVIC_EncodePriority(NVIC_GetPriorityGrouping(),15, 0));
+
   /* SysTick_IRQn interrupt configuration */
-  NVIC_SetPriority(SysTick_IRQn, NVIC_EncodePriority(NVIC_GetPriorityGrouping(),15, 0));
+  NVIC_SetPriority(SysTick_IRQn, NVIC_EncodePriority(NVIC_GetPriorityGrouping(),0, 0));
 
   /* USER CODE BEGIN Init */
 
@@ -184,8 +187,14 @@ int main(void)
   }
   /* USER CODE END 3 */
 }
+void SysTick_Handler(void)
+{
 
-__attribute__ ((naked)) void SysTick_Handler(void)
+  SCB->ICSR |= SCB_ICSR_PENDSVSET_Msk;
+}
+
+__attribute__ ((naked)) void PendSV_Handler(void)
+// __attribute__ ((naked)) void SysTick_Handler(void)
 {
   	  /* Save the context of current task */
 	  // save LR back to main, must do this firstly
