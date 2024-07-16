@@ -6,7 +6,7 @@ Firmware version 是 STM32Cube FW_F4 V1.27.1
 
 编译命令：  
 artuguy@ryzen5:~/stm32/f407ze$ make  
-烧写命令：  
+烧写命令:  
 artuguy@ryzen5:~/stm32/f407ze$ openocd -f interface/stlink.cfg -f target/stm32f4x.cfg -c "program /home/artuguy/stm32/f407ze/build/f407ze.elf reset exit"
 
 目录结构：  
