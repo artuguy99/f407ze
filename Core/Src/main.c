@@ -8,8 +8,22 @@
 #define TASK_NUMBER_MAX   (16)
 #define TASK_STACK_SIZE   (1024u)
 
+typedef enum {
+  RUNNING,
+  BLOCKED
+} TaskState_t;
+
+typedef struct {
+  void (*handler)(void);
+  TaskState_t state;
+  uint32_t psp;
+  uint32_t waitToTick;
+} TCB_t;
+
+uint32_t __gSysTicks = 0;
 uint32_t __uCurrentTaskIdx = 0;
-uint32_t __puTasksPSP[TASK_NUMBER_MAX] = {0};
+// uint32_t __puTasksPSP[TASK_NUMBER_MAX] = {0};
+TCB_t __pTasks[TASK_NUMBER_MAX] = {0};
 
 /* USER CODE END PV */
 
@@ -19,19 +33,38 @@ static void MX_GPIO_Init(void);
 static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
 uint32_t get_current_psp() {
-  return __puTasksPSP[__uCurrentTaskIdx];
+  return __pTasks[__uCurrentTaskIdx].psp;
 }
 
 void save_current_psp(uint32_t psp) {
-  __puTasksPSP[__uCurrentTaskIdx] = psp;
+  __pTasks[__uCurrentTaskIdx].psp = psp;
 }
 
 void select_next_task() {
+  /* Check all task state */
+  for(int i=0; i<TASK_NUMBER_MAX; i++) {
+    if(__pTasks[i].state == BLOCKED) {
+      if(__gSysTicks >= __pTasks[i].waitToTick) {
+        __pTasks[i].state = RUNNING;
+      }
+    }
+  }
+
   /* Round-Robin scheduler */
+  while (1)
+  {
   __uCurrentTaskIdx++;
   // check if a task is register at current slot
-  if (__uCurrentTaskIdx >= TASK_NUMBER_MAX || __puTasksPSP[__uCurrentTaskIdx] == 0) {
+  if (__uCurrentTaskIdx >= TASK_NUMBER_MAX || __pTasks[__uCurrentTaskIdx].psp == 0) {
     __uCurrentTaskIdx=0;
+  }
+  if(__pTasks[__uCurrentTaskIdx].state == RUNNING) break;
+  }
+}
+
+void idle_main(void) {
+  while(1) {
+    __asm volatile("NOP");
   }
 }
 
@@ -64,18 +97,43 @@ void start_scheduler() {
 
   // Step 6: Run the 1st task
   // get the handler of the first task by tracing back from PSP which is at R4 slot
-  void (*handler)() = (void (*))((uint32_t*)__puTasksPSP[__uCurrentTaskIdx])[14];
+  // void (*handler)() = (void (*))((uint32_t*)__puTasksPSP[__uCurrentTaskIdx])[14];
+  void (*handler)() = __pTasks[__uCurrentTaskIdx].handler;
 
   // execute the handler
   handler();
 }
 
+void reschedule(uint32_t priv) {
+  if(priv) {
+    // trigger PendSV directly
+    SCB->ICSR |= SCB_ICSR_PENDSVSET_Msk;
+  } else {
+    // call Supervisor exception to get Privileged access
+    __asm volatile("SVC #255");
+  }
+}
+
+void task_delay(uint32_t ticks) {
+  if(__uCurrentTaskIdx) {
+    __pTasks[__uCurrentTaskIdx].state = BLOCKED;
+    __pTasks[__uCurrentTaskIdx].waitToTick = __gSysTicks + ticks;
+    reschedule(0); // unprivileged
+  }
+}
 
 void init_task(void (*handler)) {
+  // init idle if it is not found
+  if (handler != idle_main) {
+    if (__pTasks[0].handler != idle_main) {
+      init_task(idle_main);
+    }
+  }
+
   int i=0;
   // find an empty slot
   for(; i<TASK_NUMBER_MAX; i++) {
-    if (__puTasksPSP[i] == 0) break;
+    if (__pTasks[i].psp == 0) break;
   }
 
   if(i >= TASK_NUMBER_MAX) {
@@ -107,19 +165,24 @@ void init_task(void (*handler)) {
   *(--psp) = 0x04040404u; // Dummy R4
 
   // save PSP
-  __puTasksPSP[i] = (uint32_t)psp;
+  __pTasks[i].psp = (uint32_t)psp;
+    // initial state
+  __pTasks[i].state = RUNNING;
+  __pTasks[i].handler = handler;
 }
 
 /* Tasks */
 void task1_main(void) {
   while(1) {
     printf("1111\n\r");
+    task_delay(128);
   }
 }
 
 void task2_main(void) {
   while(1) {
     printf("2222\n\r");
+    task_delay(128);
   }
 }
 
@@ -189,8 +252,57 @@ int main(void)
 }
 void SysTick_Handler(void)
 {
+  __gSysTicks++;
+  reschedule(1); // privileged
+  // SCB->ICSR |= SCB_ICSR_PENDSVSET_Msk;
+}
 
-  SCB->ICSR |= SCB_ICSR_PENDSVSET_Msk;
+__attribute__ ((naked)) void SVC_Handler(void) {
+  /*  按位与  LR & 0100, 更新 APSR(Application Program Status Register)的 N 位和 Z 位   */ 
+  __asm volatile("TST LR, 4"); // check LR to know which stack is used
+
+  /* 
+  "ITE EQ" 相当于 If Then Else    
+  if( APSR Z 置位) { 
+    "MRSEQ R0, MSP" R0 <- MSP
+    } else { 
+    "MRSNE R0, PSP" R0 <- PSP 
+  }*/
+  __asm volatile("ITE EQ"); // 2 next instructions are conditional
+  __asm volatile("MRSEQ R0, MSP"); // R0 <- MSP, save MSP if bit 2 is 0
+  __asm volatile("MRSNE R0, PSP"); // R0 <- PSP, save PSP if bit 2 is 1
+  /* 跳转到 SVC_Handler_main，参数在 R0 的寄存器里*/
+  __asm volatile("B SVC_Handler_main"); // pass R0 as the argument
+}
+
+void SVC_Handler_main(uint32_t* SP) {
+  // get the address of the instruction saved in PC
+  /*
+      |_____xPSR___|
+      |_____PC_____|
+      |_____LR_____|
+      |_____R12____|
+      |_____R3_____|
+      |_____R2_____|
+      |_____R1_____|
+      |_____R0_____|  <---   uint32_t* SP
+  */
+  uint8_t *pInstruction = (uint8_t*)(SP[6]);
+
+  // go back 2 bytes (16-bit opcode)
+  pInstruction -= 2;
+
+  // get the opcode, in little endian
+  uint8_t svc_num = *pInstruction;
+
+  switch(svc_num) {
+    case 0xFF:
+      // trigger PendSV
+      SCB->ICSR |= SCB_ICSR_PENDSVSET_Msk;
+      break;
+    default:
+      break;
+  }
 }
 
 __attribute__ ((naked)) void PendSV_Handler(void)
